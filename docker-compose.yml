@@ -1,0 +1,41 @@
+version: '3.8'
+
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    volumes:
+      - .:/app
+    environment:
+      - SERPER_API_KEY=${SERPER_API_KEY}
+      - HF_TOKEN=${HF_TOKEN}
+    ports:
+      - "8000:8000"
+    depends_on:
+      - chrome
+    networks:
+      - app-network
+
+  frontend:
+    build:
+      context: .
+      dockerfile: frontend/Dockerfile
+    ports:
+      - "8501:8501"
+    depends_on:
+      - backend
+    networks:
+      - app-network
+
+  chrome:
+    image: selenium/standalone-chrome
+    ports:
+      - "4444:4444"
+    shm_size: 2gb
+    networks:
+      - app-network
+
+networks:
+  app-network:
+    driver: bridge

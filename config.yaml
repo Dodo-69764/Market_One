@@ -1,0 +1,6 @@
+scraper:
+  daraz_url: "https://www.daraz.pk/catalog/?q={search_term}"
+  max_items: 5
+query_processor:
+  location: "Pakistan"
+  bert_model: "bert-base-uncased"
