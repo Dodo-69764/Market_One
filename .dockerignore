@@ -1,0 +1,133 @@
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Python
+*.pyc
+__pycache__/
+*.env
+*.log
+*.ipynb
+*.pyproj
+*.pyz
+
+# Environment variables
+.env
+.env.local
+.env*.local
+
+# IDEs
+.vscode/
+.idea/
+*.sublime-project
+*.sublime-workspace
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Virtual Environments
+.venv/
+venv/
+env/
+ENV/
+env.bak/
+venv.bak/
+
+# Build and distribution
+build/
+dist/
+*.egg-info/
+*.egg
+*.manifest
+*.spec
+pip-wheel-metadata/
+
+# Data files
+data/
+logs/
+*.csv
+*.json
+*.h5
+*.hdf5
+*.pkl
+*.pickle
+*.parquet
+*.feather
+*.db
+*.sqlite3
+
+# Machine learning models
+*.pt
+*.pth
+*.onnx
+*.tflite
+*.weights
+*.bin
+*.joblib
+
+# Large binaries
+*.dll
+*.so
+*.dylib
+*.lib
+*.a
+*.exe
+
+# Archives
+*.zip
+*.tar.gz
+*.7z
+*.rar
+
+# Images and media
+*.jpg
+*.jpeg
+*.png
+*.gif
+*.bmp
+*.tiff
+*.mp4
+*.mov
+*.avi
+
+# Documentation
+docs/_build/
+
+# Notebook checkpoints
+.ipynb_checkpoints/
+
+# PyTorch specific
+*.bin
+*.pt
+*.pth
+*.ckpt
+*.safetensors
+
+# Hugging Face cache
+.cache/
+.huggingface/
+transformers/
+
+# PyTorch
+*.onnx
+*.safetensors
+
+# Large binaries
+*.dll
+*.lib
+*.pth
+*.pt
+*.bin
+*.exe
+
+# IDEs
+.vscode/
+.idea/
+
+# OS files
+.DS_Store
+Thumbs.db
+desktop.ini

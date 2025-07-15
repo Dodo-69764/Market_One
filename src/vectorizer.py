@@ -1,18 +1,37 @@
-"""
-Simple TF‑IDF helper.
-
-Returns a 2‑tuple (vectorizer, matrix) or (None, None) if the
-input list is empty.  Never more – so the call‑site can unpack safely.
-"""
-
+from typing import List, Dict, Tuple
 from sklearn.feature_extraction.text import TfidfVectorizer
-from typing import List, Tuple, Optional, Dict
+from sklearn.metrics.pairwise import cosine_similarity
 
-def vectorize_products(products: List[Dict]) -> Tuple[Optional[TfidfVectorizer], Optional[object]]:
-    if not products:
-        return None, None
+def vectorize_products(
+    products: List[Dict],
+    query: str = "",
+    return_query_vector: bool = False
+) -> Tuple[List[Dict], List[List[float]], List[float] ]:
 
-    corpus = [p["name"] for p in products]
-    vec = TfidfVectorizer(stop_words="english")
-    mat = vec.fit_transform(corpus)
-    return vec, mat
+    # Extract product descriptions
+    texts = [p.get("description", p["name"]) for p in products]
+
+    if query:
+        texts_with_query = [query] + texts
+    else:
+        texts_with_query = texts
+
+    # Fit TF-IDF
+    vectorizer = TfidfVectorizer(max_features=256)
+    matrix = vectorizer.fit_transform(texts_with_query).toarray()
+
+    # Separate query vector if needed
+    if query and return_query_vector:
+        query_vec = matrix[0]
+        product_vecs = matrix[1:]
+    else:
+        query_vec = None
+        product_vecs = matrix
+
+    # Optionally attach similarity scores
+    if query and return_query_vector:
+        scores = cosine_similarity([query_vec], product_vecs)[0]
+        for i, score in enumerate(scores):
+            products[i]["similarity"] = float(score)
+
+    return products, product_vecs, query_vec
