@@ -15,18 +15,6 @@ interface SearchFiltersProps {
   results: SearchResult[]
 }
 
-const categories = [
-  "Electronics",
-  "Fashion",
-  "Home & Garden",
-  "Sports",
-  "Books",
-  "Beauty",
-  "Automotive",
-  "Toys",
-  "Health",
-  "Jewelry",
-]
 
 const sortOptions = [
   { value: "relevance", label: "Most Relevant" },

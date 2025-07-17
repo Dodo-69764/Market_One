@@ -159,28 +159,30 @@ export function GroupedSearchResults({ results, viewMode, isLoading, filters }: 
   }
 
   const getImageUrl = (product: SearchResult) => {
-    if (!product.image || typeof product.image !== "string") {
-      console.log(`No valid image for product: ${product.name || "Unknown"}`)
-      return "/placeholder.svg?height=300&width=300"
-    }
-
-    if (product.image.startsWith("http")) {
-      return product.image
-    }
-
-    if (product.image.startsWith("/images")) {
-      return product.image
-    }
-
-    const lowerSource = product.source?.toLowerCase() || "web"
-    const folder = lowerSource.includes("daraz") ? "daraz" : "web"
-    const imageUrl = `/images/${folder}/${product.image}`
-    
-    // Debug: Log generated image URL
-    console.log(`Image URL for ${product.name || "Unknown"}: ${imageUrl}`)
-    
-    return imageUrl
+  console.log(`Product: ${product.name || "Unknown"}, Image: ${product.image}, Source: ${product.source}`);
+  if (!product.image || typeof product.image !== "string") {
+    console.log(`No valid image for product: ${product.name || "Unknown"}`);
+    return "/placeholder.svg?height=300&width=300";
   }
+
+  if (product.image.startsWith("http")) {
+    console.log(`Using direct URL: ${product.image}`);
+    return product.image;
+  }
+
+  if (product.image.startsWith("/data/images")) {
+    console.log(`Using provided path: ${product.image}`);
+    return product.image;
+  }
+
+  const lowerSource = product.source?.toLowerCase() || "web";
+  const folder = lowerSource.includes("daraz") ? "daraz" : "web";
+  // Extract just the filename to avoid duplicating path segments
+  const imageName = product.image.split('/').pop() || product.image;
+  const imageUrl = `/data/images/${folder}/${imageName}`;
+  console.log(`Generated image URL: ${imageUrl}`);
+  return imageUrl;
+};
 
   if (isLoading) {
     return (
