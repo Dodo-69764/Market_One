@@ -2,8 +2,7 @@
 from __future__ import annotations
 from pathlib import Path
 from typing import List, Dict, Tuple
-import itertools, json, logging, re
-
+import itertools, json, logging, re, time, requests, io, base64
 import numpy as np
 from PIL import Image
 from wordfreq import zipf_frequency
@@ -13,6 +12,7 @@ from src.ocr_utils       import extract_text_info
 from src.query_llm       import analyse
 from src.daraz_scraper   import scrape_daraz
 from src.generic_scraper import scrape_generic
+from src.vectorizer import vectorize_products
 
 log = logging.getLogger(__name__)
 
@@ -22,7 +22,6 @@ _BRANDS = {"nike","adidas","apple","dell","hp","samsung","lenovo",
 _WORD   = re.compile(r"[a-z]{3,}", re.I)
 
 def _zipf_ok(w: str) -> bool:
-    from wordfreq import zipf_frequency
     return zipf_frequency(w.lower(), "en") >= 2.5
 
 def _clean(words: list[str]) -> list[str]:
@@ -34,6 +33,8 @@ def _clean(words: list[str]) -> list[str]:
     return out[:20]
 
 def _cos(a, b) -> float:
+    a = np.array(a)
+    b = np.array(b)
     return float(a.dot(b) / (np.linalg.norm(a) * np.linalg.norm(b) + 1e-9))
 
 def _safe_meta(raw, fallback: str) -> Dict:
@@ -46,62 +47,135 @@ def _safe_meta(raw, fallback: str) -> Dict:
     raw.setdefault("brand", "")
     return raw
 
-# ───────── main ──────────────────────────────────────────────────
-def search_by_image(path: str, max_per_site: int = 30
-) -> Tuple[List[Dict], Dict]:
-    caption   = caption_image(path)
-    clip_tag  = clip_probe(Path(path), list(_BRANDS))[:1]
-    ocr       = extract_text_info(path)
+def get_image_vector(img_url: str) -> np.ndarray:
+    """Get image vector from URL or local path"""
+    try:
+        # Handle local paths
+        if img_url.startswith("/data/images/"):
+            # Construct absolute path
+            root_dir = Path(__file__).resolve().parent.parent
+            img_path = root_dir / img_url.lstrip("/")
+            with open(img_path, "rb") as f:
+                return np.asarray(embed_image(f.read()), dtype=np.float32)
+        
+        # Handle base64 images
+        if img_url.startswith("data:image"):
+            header, data = img_url.split(",", 1)
+            img_data = base64.b64decode(data)
+            return np.asarray(embed_image(img_data), dtype=np.float32)
+        
+        # Handle remote URLs
+        response = requests.get(img_url, timeout=10)
+        response.raise_for_status()
+        return np.asarray(embed_image(response.content), dtype=np.float32)
+    
+    except Exception as e:
+        log.error(f"Failed to get image vector for {img_url}: {e}")
+        return np.zeros(512, dtype=np.float32)  # Return zero vector on failure
 
-    brand = clip_tag[0] if clip_tag else ocr.get("brand_hint","")
-
+# Main Function
+def search_by_image(path: str, max_per_site: int = 30) -> Tuple[List[Dict], Dict]:
+    log.info(f"Starting image search for: {path}")
+    start_time = time.time()
+    
+    # Process image
+    caption = caption_image(path) or "product"
+    log.info(f"Caption generated: {caption}")
+    
+    ocr = extract_text_info(path)
+    log.info(f"OCR results: {ocr}")
+    
+    clip_tag = clip_probe(Path(path), list(_BRANDS))[:1]
+    brand = clip_tag[0] if clip_tag else ocr.get("brand_hint", "")
+    log.info(f"Brand identified: {brand}")
+    
+    # Generate query
     prompt = (
         f"Caption: '{caption}'. "
         f"OCR words: {', '.join(_clean(ocr['words'])) or 'none'}. "
         f"Sizes: {', '.join(ocr['sizes'][:5]) or 'none'}. "
         f'Brand guess: "{brand or "unknown"}". '
-        "Give JSON {core_term, alt_queries (≤2)}"
+        "Generate a product search query and alternatives."
     )
     meta = _safe_meta(analyse(prompt), caption)
-    if brand and not meta["brand"]:
+    
+    # Add brand to meta
+    if brand and not meta.get("brand"):
         meta["brand"] = brand
-
-    # 🔧 Patch missing fields to avoid KeyError
-    meta.setdefault("positive_keywords", [])
-    meta.setdefault("negative_keywords", [])
-    meta.setdefault("categories", [])
-
-    print("Caption :", caption)
-    print("OCR     :", ", ".join(_clean(ocr["words"])) or "–")
-    q_preview = [meta["core_term"], *meta["alt_queries"]]
-    print("Queries :", " | ".join(filter(None, q_preview)))
-
-    queries = [meta["core_term"]] if meta["core_term"] else []
+    
+    # Prepare queries
+    queries = [meta["core_term"]]
     if meta["brand"]:
         queries.append(f"{meta['brand']} {meta['core_term']}")
-    queries.extend(meta["alt_queries"][:2])
-    for sz in ocr["sizes"]:
-        queries.append(f"{meta['core_term']} {sz}")
-
-    seen_q, items, seen_urls = set(), [], set()
-    for q in [x for x in queries if x and not (x.lower() in seen_q or seen_q.add(x.lower()))]:
-        for it in itertools.chain(
-            scrape_daraz(q, meta, max_per_site),
-            scrape_generic(q,               5),
-        ):
-            if it["url"] in seen_urls: continue
-            seen_urls.add(it["url"]); items.append(it)
-
-    if not items: return [], meta
-
-    q_vec = np.asarray(embed_image(path), dtype=np.float32)
-    hits  = []
-    for it in items:
-        img = it.get("image") or it["url"]
+    queries.extend(meta.get("alt_queries", [])[:2])
+    
+    # Deduplicate queries
+    unique_queries = []
+    seen = set()
+    for q in queries:
+        q_lower = q.lower()
+        if q_lower not in seen and q_lower.strip():
+            seen.add(q_lower)
+            unique_queries.append(q)
+    
+    log.info(f"Search queries: {', '.join(unique_queries)}")
+    
+    # Scrape results
+    items = []
+    for q in unique_queries:
+        log.info(f"Searching Daraz for: {q}")
+        daraz_items = scrape_daraz(q, meta, max_per_site)
+        log.info(f"Found {len(daraz_items)} Daraz items")
+        items.extend(daraz_items)
+        
+        log.info(f"Searching web for: {q}")
+        web_items = scrape_generic(q, max_items=5)
+        log.info(f"Found {len(web_items)} web items")
+        items.extend(web_items)
+    
+    log.info(f"Total items found: {len(items)}")
+    
+    # Get CLIP embedding for query image
+    try:
+        with open(path, "rb") as f:
+            q_vec = np.asarray(embed_image(f.read()), dtype=np.float32)
+    except Exception as e:
+        log.error(f"Failed to embed query image: {e}")
+        q_vec = np.zeros(512, dtype=np.float32)
+    
+    # Calculate CLIP-based similarity
+    for item in items:
         try:
-            vec = np.asarray(embed_image(img), dtype=np.float32)
-            hits.append(it | {"similarity": _cos(q_vec, vec)})
-        except Exception: pass
-
-    hits.sort(key=lambda d: d["similarity"], reverse=True)
-    return hits, meta
+            img_url = item.get("image") or item["url"]
+            img_vec = get_image_vector(img_url)
+            item["clip_similarity"] = _cos(q_vec, img_vec)
+        except Exception as e:
+            log.error(f"Vectorization failed for {item['url']}: {e}")
+            item["clip_similarity"] = 0.0
+    
+    # Calculate text-based similarity using core term
+    if meta["core_term"]:
+        items, _, _ = vectorize_products(
+            items,
+            query=meta["core_term"],
+            similarity_key="text_similarity"
+        )
+    else:
+        # Initialize text similarity if missing
+        for item in items:
+            item["text_similarity"] = 0.0
+    
+    # Combine scores using weighted average
+    for item in items:
+        clip_score = item.get("clip_similarity", 0)
+        text_score = item.get("text_similarity", 0)
+        # Weighted average favoring visual similarity
+        item["similarity"] = 0.7 * clip_score + 0.3 * text_score
+    
+    # Sort and return top results
+    items.sort(key=lambda x: x["similarity"], reverse=True)
+    top_items = items[:max_per_site]
+    
+    duration = time.time() - start_time
+    log.info(f"Image search completed in {duration:.1f}s. Found {len(top_items)} products.")
+    return top_items, meta

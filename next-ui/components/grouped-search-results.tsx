@@ -43,52 +43,60 @@ export function GroupedSearchResults({ results, viewMode, isLoading, filters }: 
   const [showComparison, setShowComparison] = useState(false)
   const [expandedSources, setExpandedSources] = useState<Set<string>>(new Set())
 
+  // Debug: Log incoming results
+  console.log("Search results:", results)
+
   // Apply filters and sorting
   const filteredAndSortedResults = useMemo(() => {
     const filtered = results.filter((product) => {
-      // Filter by categories
+      // Filter by categories (to be enhanced with actual category data)
       if (filters.categories.length > 0) {
-        // This would need to be enhanced based on your product category data
-        // For now, we'll skip category filtering
+        // Placeholder for category filtering
       }
 
-      // Filter by sources
-      if (filters.sources.length > 0) {
-        return filters.sources.includes(product.source)
+      // Filter by sources, bypass for image search
+      if (filters.sources.length > 0 && !filters.isImageSearch) {
+        return product.source ? filters.sources.includes(product.source) : false
       }
 
       return true
     })
 
+    // Debug: Log filtered results
+    console.log("Filtered results:", filtered)
+
     // Apply sorting
     switch (filters.sortBy) {
       case "price-low":
         filtered.sort((a, b) => {
-          const priceA = Number.parseFloat(String(a.price || "0").replace(/[^\d.]/g, ""))
-          const priceB = Number.parseFloat(String(b.price || "0").replace(/[^\d.]/g, ""))
+          const priceA = Number.parseFloat(String(a.price || "0").replace(/[^\d.]/g, "")) || 0
+          const priceB = Number.parseFloat(String(b.price || "0").replace(/[^\d.]/g, "")) || 0
           return priceA - priceB
         })
         break
       case "price-high":
         filtered.sort((a, b) => {
-          const priceA = Number.parseFloat(String(a.price || "0").replace(/[^\d.]/g, ""))
-          const priceB = Number.parseFloat(String(b.price || "0").replace(/[^\d.]/g, ""))
+          const priceA = Number.parseFloat(String(a.price || "0").replace(/[^\d.]/g, "")) || 0
+          const priceB = Number.parseFloat(String(b.price || "0").replace(/[^\d.]/g, "")) || 0
           return priceB - priceA
         })
         break
       case "name-asc":
-        filtered.sort((a, b) => a.name.localeCompare(b.name))
+        filtered.sort((a, b) => (a.name || "").localeCompare(b.name || ""))
         break
       case "name-desc":
-        filtered.sort((a, b) => b.name.localeCompare(a.name))
+        filtered.sort((a, b) => (b.name || "").localeCompare(a.name || ""))
         break
       case "source":
-        filtered.sort((a, b) => a.source.localeCompare(b.source))
+        filtered.sort((a, b) => (a.source || "").localeCompare(b.source || ""))
         break
       default:
         // Keep relevance order (original order)
         break
     }
+
+    // Debug: Log final filtered and sorted results
+    console.log("Filtered and sorted results:", filtered)
 
     return filtered
   }, [results, filters])
@@ -102,6 +110,9 @@ export function GroupedSearchResults({ results, viewMode, isLoading, filters }: 
     acc[source].push(product)
     return acc
   }, {} as GroupedResults)
+
+  // Debug: Log grouped results
+  console.log("Grouped results:", groupedResults)
 
   const handleChatWithProduct = (product: SearchResult) => {
     setSelectedProduct(product)
@@ -148,21 +159,27 @@ export function GroupedSearchResults({ results, viewMode, isLoading, filters }: 
   }
 
   const getImageUrl = (product: SearchResult) => {
-    // Handle different image URL formats
-    if (product.image) {
-      // If it's already a full URL, use it
-      if (product.image.startsWith("http")) {
-        return product.image
-      }
-      // If it's a relative path, construct the full URL
-      if (product.image.startsWith("/")) {
-        return `${process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"}${product.image}`
-      }
-      // If it's just a filename, construct the path
-      return `${process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"}/images/${product.image}`
+    if (!product.image || typeof product.image !== "string") {
+      console.log(`No valid image for product: ${product.name || "Unknown"}`)
+      return "/placeholder.svg?height=300&width=300"
     }
-    // Fallback to placeholder
-    return "/placeholder.svg?height=300&width=300"
+
+    if (product.image.startsWith("http")) {
+      return product.image
+    }
+
+    if (product.image.startsWith("/images")) {
+      return product.image
+    }
+
+    const lowerSource = product.source?.toLowerCase() || "web"
+    const folder = lowerSource.includes("daraz") ? "daraz" : "web"
+    const imageUrl = `/images/${folder}/${product.image}`
+    
+    // Debug: Log generated image URL
+    console.log(`Image URL for ${product.name || "Unknown"}: ${imageUrl}`)
+    
+    return imageUrl
   }
 
   if (isLoading) {
@@ -179,7 +196,9 @@ export function GroupedSearchResults({ results, viewMode, isLoading, filters }: 
               >
                 {Array.from({ length: viewMode === "tiles" ? 4 : 3 }).map((_, j) => (
                   <div key={j} className="space-y-3">
-                    <Skeleton className={`${viewMode === "tiles" ? "h-48" : "h-24"} w-full rounded-lg bg-white/10`} />
+                    <Skeleton
+                      className={`${viewMode === "tiles" ? "h-48" : "h-24"} w-full rounded-lg bg-white/10`}
+                    />
                     <Skeleton className="h-4 w-3/4 bg-white/10" />
                     <Skeleton className="h-4 w-1/2 bg-white/10" />
                   </div>
@@ -225,6 +244,7 @@ export function GroupedSearchResults({ results, viewMode, isLoading, filters }: 
                       {product.name.split(" ").slice(0, 2).join(" ")}
                     </Badge>
                   ))}
+ eradicate
                 </div>
               </div>
               <div className="flex gap-2">
@@ -261,7 +281,6 @@ export function GroupedSearchResults({ results, viewMode, isLoading, filters }: 
             <Collapsible open={expandedSources.has(source)} onOpenChange={() => toggleSourceExpansion(source)}>
               <CollapsibleTrigger asChild>
                 <CardHeader className="cursor-pointer hover:bg-white/5 transition-colors duration-300 rounded-t-lg relative overflow-hidden">
-                  {/* Enhanced background with layered effect */}
                   <div className="absolute inset-0 bg-gradient-to-r from-purple-600/10 via-transparent to-pink-600/10"></div>
                   <div className="absolute top-0 right-0 w-32 h-32 bg-gradient-to-bl from-purple-500/20 to-transparent rounded-bl-full"></div>
 
@@ -310,10 +329,8 @@ export function GroupedSearchResults({ results, viewMode, isLoading, filters }: 
 
               <CollapsibleContent className="transition-all duration-500 ease-in-out">
                 <CardContent className="pt-0 pb-6">
-                  {/* Stacked/Layered Preview (Collapsed State) */}
                   {!expandedSources.has(source) && products.length > 0 && (
                     <div className="relative">
-                      {/* Stacked card effect */}
                       <div className="absolute inset-0 bg-gradient-to-r from-purple-500/10 to-pink-500/10 rounded-lg transform rotate-1 scale-95"></div>
                       <div className="absolute inset-0 bg-gradient-to-r from-pink-500/10 to-purple-500/10 rounded-lg transform -rotate-1 scale-98"></div>
 
@@ -366,7 +383,6 @@ export function GroupedSearchResults({ results, viewMode, isLoading, filters }: 
                     </div>
                   )}
 
-                  {/* Expanded View - All Products */}
                   {expandedSources.has(source) && (
                     <div className="bg-white/5 rounded-lg p-4 border border-white/10">
                       {viewMode === "tiles" ? (
@@ -443,6 +459,18 @@ function ProductTile({
   remainingCount = 0,
   getImageUrl,
 }: ProductTileProps) {
+  // Debug: Log product being rendered
+  console.log("Rendering ProductTile for:", product)
+
+  const handleBuyClick = () => {
+    console.log("Attempting to open URL:", product.url)
+    try {
+      window.open(product.url, "_blank")
+    } catch (error) {
+      console.error("Failed to open URL:", error)
+    }
+  }
+
   return (
     <Card
       className={`group overflow-hidden transition-all duration-500 transform hover:scale-105 hover:-translate-y-2 ${
@@ -461,38 +489,32 @@ function ProductTile({
             }`}
           />
         </div>
-
         <img
-          src={getImageUrl(product) || "/placeholder.svg"}
-          alt={product.name}
+          src={getImageUrl(product)}
+          alt={product.name || "Unknown"}
           className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-500"
           onError={(e) => {
             const target = e.target as HTMLImageElement
             target.src = "/placeholder.svg?height=300&width=300"
           }}
         />
-
         {product.similarity && (
           <Badge className="absolute top-3 right-3 bg-gradient-to-r from-green-600 to-emerald-600 text-white shadow-lg">
             <Zap className="w-3 h-3 mr-1" />
             {(product.similarity * 100).toFixed(0)}% match
           </Badge>
         )}
-
         {isMainProduct && remainingCount > 0 && (
           <Badge className="absolute bottom-3 right-3 bg-gradient-to-r from-purple-600 to-pink-600 text-white shadow-lg">
             +{remainingCount} more
           </Badge>
         )}
-
         <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
       </div>
-
       <CardContent className="p-4 space-y-3">
         <h3 className="font-space-grotesk text-sm font-semibold text-white line-clamp-2 min-h-[2.5rem] group-hover:text-purple-200 transition-colors">
-          {product.name}
+          {product.name || "Unknown"}
         </h3>
-
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-1">
             {[...Array(5)].map((_, i) => (
@@ -501,25 +523,22 @@ function ProductTile({
           </div>
           <Badge variant="secondary" className="bg-purple-500/20 text-purple-200 border-purple-400/30 text-xs">
             <Shield className="w-2 h-2 mr-1" />
-            {product.source}
+            {product.source || "Unknown"}
           </Badge>
         </div>
-
         <p className="text-lg font-bold bg-gradient-to-r from-purple-400 to-pink-400 bg-clip-text text-transparent">
           Rs. {product.price || "N/A"}
         </p>
-
         {!isPreview && (
           <div className="flex gap-1">
             <Button
               size="sm"
               className="flex-1 bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-700 hover:to-pink-700 text-white text-xs group/btn"
-              onClick={() => window.open(product.url, "_blank")}
+              onClick={handleBuyClick}
             >
               <ShoppingCart className="h-3 w-3 mr-1 group-hover/btn:animate-bounce" />
               Buy
             </Button>
-
             <Button
               size="sm"
               variant="outline"
@@ -552,6 +571,9 @@ function ProductListItem({
   getImageUrl,
   isPreview = false,
 }: ProductListItemProps) {
+  // Debug: Log product being rendered
+  console.log("Rendering ProductListItem for:", product)
+
   return (
     <Card
       className={`group hover:shadow-md transition-all duration-300 ${
@@ -571,8 +593,8 @@ function ProductListItem({
               />
             </div>
             <img
-              src={getImageUrl(product) || "/placeholder.svg"}
-              alt={product.name}
+              src={getImageUrl(product)}
+              alt={product.name || "Unknown"}
               className="w-24 h-24 object-cover rounded-lg shadow-lg group-hover:scale-105 transition-transform duration-300"
               onError={(e) => {
                 const target = e.target as HTMLImageElement
@@ -583,13 +605,13 @@ function ProductListItem({
 
           <div className="flex-1 min-w-0 space-y-2">
             <h3 className="font-space-grotesk text-lg font-semibold text-white group-hover:text-purple-200 transition-colors line-clamp-2">
-              {product.name}
+              {product.name || "Unknown"}
             </h3>
 
             <div className="flex items-center gap-3">
               <Badge variant="secondary" className="bg-purple-500/20 text-purple-200 border-purple-400/30">
                 <Shield className="w-3 h-3 mr-1" />
-                {product.source}
+                {product.source || "Unknown"}
               </Badge>
               {product.similarity && (
                 <Badge variant="outline" className="border-green-400/50 text-green-300">

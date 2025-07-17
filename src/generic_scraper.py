@@ -1,41 +1,41 @@
+# generic_scraper.py
+
 from __future__ import annotations
-import hashlib, io, json, logging, os, re, urllib.parse
+import json, logging, os, re, time, urllib.parse, uuid, base64
 from pathlib import Path
 from typing import List
+import io
 
 import cloudscraper
 import requests
 from bs4 import BeautifulSoup
 from fake_useragent import UserAgent
+from PIL import Image
 from dotenv import load_dotenv
-
-# ─────── Setup ───────────────────────────────────────────────────
+# Setup
 load_dotenv()
 log = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
-
 _UA = UserAgent()
 _scr = cloudscraper.create_scraper()
 _RS_RE = re.compile(r"(?:Rs\.?|PKR)\s?(\d[\d,.]*)")
-_AVIF_CT = {"image/avif", "image/avif-sequence"}
-
 SERPER_ENDPOINT = "https://google.serper.dev/search"
 SERPER_KEY = os.getenv("SERPER_API_KEY", "").strip()
+
 if not SERPER_KEY:
     log.warning("SERPER_API_KEY missing – generic scraper will return no results")
 
-# Paths for saving images
-IMG_DIR = Path("data/images/web")
-IMG_DIR.mkdir(parents=True, exist_ok=True)
+ROOT_DIR = Path(__file__).resolve().parent.parent
+IMG_BACKEND = ROOT_DIR / "data" / "images" / "web"
+IMG_FRONTEND = ROOT_DIR / "next-ui" / "public" / "data" / "images" / "web"
+IMG_BACKEND.mkdir(parents=True, exist_ok=True)
+IMG_FRONTEND.mkdir(parents=True, exist_ok=True)
 
-NEXT_UI_IMG_DIR = Path("C:/Projects/ProductAggregator/next-ui/public/data/images/daraz")
-NEXT_UI_IMG_DIR.mkdir(parents=True, exist_ok=True)
-
-SKIP_DOMAINS = {"daraz.pk", "temu.com", "amazon.", "ebay."}
+SKIP_DOMAINS = {"daraz.pk"}
 PROXY_URL = os.getenv("PROXY", "").strip()
 PROXY = {"http": PROXY_URL, "https": PROXY_URL} if PROXY_URL else None
 
-# ─────── Utilities ───────────────────────────────────────────────
+# Utilities
 def _ua() -> str:
     return _UA.random
 
@@ -46,75 +46,72 @@ def _proxy_for(url: str):
 def _clean_price(p: str) -> str:
     return p.replace(",", "").strip()
 
-def _slug(url: str) -> str:
-    host = urllib.parse.urlparse(url).netloc
-    return f"{host}_{hashlib.md5(url.encode()).hexdigest()[:10]}"
+def _looks_relevant(title: str, tokens: list[str]) -> bool:
+    low = title.lower()
+    return any(tok.lower() in low for tok in tokens)
 
-def _ext(content_type: str, url: str) -> str:
-    if content_type in _AVIF_CT: return ".avif"
-    if content_type == "image/webp": return ".webp"
-    if content_type == "image/png": return ".png"
-    if content_type == "image/jpeg": return ".jpg"
-    return os.path.splitext(url.split("?")[0])[1][:5] or ".jpg"
-
-# ─────── Image & Price Extraction ────────────────────────────────
+# Image & Price Helpers
 def _first_image(html: str, page_url: str) -> str:
-    soup = BeautifulSoup(html, "html.parser")
-    img = soup.find("img", src=True)
-    if not img:
-        return ""
-
-    src = urllib.parse.urljoin(page_url, img["src"])
-
     try:
+        soup = BeautifulSoup(html, "html.parser")
+        img = soup.find("img", src=True)
+        if not img:
+            return ""
+
+        src = urllib.parse.urljoin(page_url, img["src"])
+        
+        # Handle base64 images
+        if src.startswith("data:image"):
+            try:
+                header, data = src.split(",", 1)
+                filename = f"{uuid.uuid4().hex}.jpg"
+                backend_path = IMG_BACKEND / filename
+                frontend_path = IMG_FRONTEND / filename
+                img_data = base64.b64decode(data)
+                with Image.open(io.BytesIO(img_data)) as img:
+                    img.convert("RGB").save(backend_path, "JPEG", quality=90)
+                    img.convert("RGB").save(frontend_path, "JPEG", quality=90)
+                return f"/data/images/web/{filename}"
+            except Exception as e:
+                log.warning("Base64 image save failed: %s", e)
+                return ""
+        
+        # Handle remote images
         r = _scr.get(src, timeout=8, headers={"User-Agent": _ua()}, proxies=_proxy_for(src))
         r.raise_for_status()
-
-        ext = _ext(r.headers.get("Content-Type", ""), src)
-        name = _slug(page_url) + ext
-        fp_main = IMG_DIR / name
-        fp_next = NEXT_UI_IMG_DIR / name
-        web_path = f"/data/images/daraz/{name}"
-
-        if fp_main.exists() and fp_next.exists():
-            return web_path
-
-        if ext in {".avif", ".webp"}:
-            try:
-                from PIL import Image
-                img = Image.open(io.BytesIO(r.content)).convert("RGB")
-                jpg_name = _slug(page_url) + ".jpg"
-                fp_main = IMG_DIR / jpg_name
-                fp_next = NEXT_UI_IMG_DIR / jpg_name
-                img.save(fp_main, "JPEG", quality=90)
-                img.save(fp_next, "JPEG", quality=90)
-                log.info("Converted and saved JPG: %s", jpg_name)
-                return f"/data/images/daraz/{jpg_name}"
-            except Exception as e:
-                log.warning("Image conversion failed (%s): %s", src, e)
-
-        fp_main.write_bytes(r.content)
-        fp_next.write_bytes(r.content)
-        log.info("Saved image: %s", name)
-        return web_path
+        
+        # Generate filename
+        filename = f"{uuid.uuid4().hex}.jpg"
+        
+        # Define paths
+        backend_path = IMG_BACKEND / filename
+        frontend_path = IMG_FRONTEND / filename
+        
+        # Save image
+        with Image.open(io.BytesIO(r.content)) as img:
+            img.convert("RGB").save(backend_path, "JPEG", quality=90)
+            img.convert("RGB").save(frontend_path, "JPEG", quality=90)
+        
+        return f"/data/images/web/{filename}"
 
     except Exception as e:
-        log.warning("Image download failed for %s: %s", src, e)
+        log.warning("Image download failed: %s", e)
         return ""
 
 def _price_from_html(html: str) -> str:
     soup = BeautifulSoup(html, "html.parser")
-
     for script in soup.find_all("script", type="application/ld+json"):
         try:
             data = json.loads(script.text)
-            if isinstance(data, list): data = data[0]
+            if isinstance(data, list):
+                data = data[0]
             price = (
                 data.get("offers", {}).get("price") or
                 data.get("price") or
                 data.get("offers", {}).get("priceSpecification", {}).get("price")
             )
-            if price: return _clean_price(str(price))
+            if price:
+                return _clean_price(str(price))
         except Exception:
             continue
 
@@ -123,11 +120,7 @@ def _price_from_html(html: str) -> str:
 
     return "0"
 
-def _looks_relevant(title: str, tokens: list[str]) -> bool:
-    low = title.lower()
-    return any(tok.lower() in low for tok in tokens)
-
-# ─────── Main Scraper Logic ──────────────────────────────────────
+# Main Logic
 def scrape_generic(query: str, max_items: int = 5) -> List[dict]:
     if not SERPER_KEY:
         return []
@@ -141,10 +134,7 @@ def scrape_generic(query: str, max_items: int = 5) -> List[dict]:
     payload = json.dumps({"q": f"{query} price in pakistan"})
 
     try:
-        resp = requests.post(
-            SERPER_ENDPOINT, headers=headers, data=payload,
-            timeout=10, proxies=_proxy_for(SERPER_ENDPOINT)
-        )
+        resp = requests.post(SERPER_ENDPOINT, headers=headers, data=payload, timeout=10, proxies=_proxy_for(SERPER_ENDPOINT))
         resp.raise_for_status()
         data = resp.json()
     except Exception as e:
@@ -164,12 +154,12 @@ def scrape_generic(query: str, max_items: int = 5) -> List[dict]:
         url = res.get("link") or res.get("url") or ""
         if not url or url in visited:
             continue
+
         dom = urllib.parse.urlparse(url).netloc.lower()
-        if any(bad in dom for bad in SKIP_DOMAINS):
+        if any(skip in dom for skip in SKIP_DOMAINS):
             continue
 
         visited.add(url)
-
         try:
             html = _scr.get(url, timeout=10, headers={"User-Agent": _ua()}, proxies=_proxy_for(url)).text
         except Exception as e:
@@ -182,13 +172,12 @@ def scrape_generic(query: str, max_items: int = 5) -> List[dict]:
 
         price = _price_from_html(html)
         image = _first_image(html, url)
-
         out.append({
             "name": title,
             "price": price,
             "eta": "N/A",
             "url": url,
-            "image": image,         # ✅ Now a web path like /data/images/daraz/abc.jpg
+            "image": image,
             "source": dom,
         })
         log.debug("✓ added %-24s | Rs.%s", dom, price)
